@@ -9,7 +9,10 @@ const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const initializeDatabase = require('./db-init');
 
+// At the top of your server startup:
+await initializeDatabase();
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
