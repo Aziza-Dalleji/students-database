@@ -12,8 +12,10 @@ const PORT = process.env.PORT || 3000;
 const initializeDatabase = require('./db-init');
 
 // At the top of your server startup:
-await initializeDatabase();
-app.use(cors());
+(async () => {
+  try {
+    await initializeDatabase();
+    app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -627,3 +629,9 @@ app.delete('/api/documents/:id', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
+
+} catch (error) {
+    console.error('Failed to start server:', error);
+    process.exit(1);
+  }
+})();
