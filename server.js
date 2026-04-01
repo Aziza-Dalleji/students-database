@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
@@ -112,7 +113,7 @@ app.get('/api/students', async (req, res) => {
         student_id: student.student_id,
         basic_info: basicInfo,
         academic_records: {
-          ...academics[0],
+          ...(academics[0] || {}),
           courses: coursesRows.map(r => r.course_name),
           honors: honorsRows.map(r => r.honor_name)
         },
@@ -191,7 +192,7 @@ app.get('/api/students/:id', async (req, res) => {
       student_id: student.student_id,
       basic_info: basicInfo,
       academic_records: {
-        ...academics[0],
+        ...(academics[0] || {}),
         courses: coursesRows.map(r => r.course_name),
         honors: honorsRows.map(r => r.honor_name)
       },
@@ -552,12 +553,13 @@ app.post('/api/students', upload.fields([
 
 // Add document endpoint with file upload
 app.post('/api/documents', upload.single('file'), async (req, res) => {
+  let connection;
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const connection = await pool.getConnection();
+    connection = await pool.getConnection();
     const filePath = `/documents/${req.file.filename}`;
     
     const [result] = await connection.query(
@@ -579,6 +581,7 @@ app.post('/api/documents', upload.single('file'), async (req, res) => {
       file_name: req.file.originalname
     });
   } catch (err) {
+    if (connection) connection.release();
     if (req.file) {
       // Delete uploaded file if database insert fails
       fs.unlink(path.join(documentsDir, req.file.filename), (unlinkErr) => {

@@ -49,12 +49,17 @@ A full-stack web application for managing student academic records, work experie
 4. **Environment Configuration**
    Create a `.env` file in the root directory:
    ```
-   DB_HOST=localhost
-   DB_PORT=3306
-   DB_USER=your_db_user
-   DB_PASSWORD=your_db_password
-   DB_NAME=student_db
+   MYSQL_URL=mysql://your_db_user:your_db_password@localhost:3306/student_db
    ```
+   Or use individual connection settings:
+   ```
+   MYSQLHOST=localhost
+   MYSQLPORT=3306
+   MYSQLUSER=your_db_user
+   MYSQLPASSWORD=your_db_password
+   MYSQLDATABASE=student_db
+   ```
+   The code also supports the alternate names `DB_URL`, `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, and `DB_NAME`.
 
 5. **Start the application**
    ```bash
