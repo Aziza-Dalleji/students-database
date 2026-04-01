@@ -24,7 +24,7 @@ async function initializeDatabase() {
       DROP TABLE IF EXISTS students;
     `);
 
-    const sql = fs.readFileSync(path.join(__dirname, 'init-db.sql'), 'utf8');
+    const sql = fs.readFileSync(path.join(__dirname, 'database.sql'), 'utf8');
     await connection.query(sql);
     await connection.end();
     
