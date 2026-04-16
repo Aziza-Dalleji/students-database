@@ -995,8 +995,78 @@ function clearFormError() {
     div.textContent = '';
     div.style.display = 'none';
     // also clear any individual marks
-    const form = document.getElementById('add-student-form') || document.getElementById('edit-student-form');
+    const form = document.getElementById('add-student-form') || document.getElementById('edit-student-form') || document.getElementById('import-students-form');
     if (form) clearFieldHighlights(form);
+}
+
+function openImportStudentsModal() {
+    document.getElementById('modal-name').textContent = 'Import Students';
+    document.getElementById('modal-sub').textContent = 'Upload an Excel or TSV file with student rows';
+    document.getElementById('modal-body').innerHTML = `
+<form id="import-students-form">
+<div id="form-error" class="form-error" style="display:none;"></div>
+<div class="form-row">
+<label>Excel/TSV file</label>
+<input type="file" name="file" accept=".xls,.xlsx,.tsv,.csv,.txt" required />
+<span class="error-text">Required</span>
+</div>
+<div class="form-row">
+<label>How to format the file</label>
+<textarea rows="5" readonly style="width:100%;background:#f8fafc;border:1px solid #cbd5e1;padding:10px;line-height:1.4rem;">Use the first sheet (for Excel) or tab-separated values (for TSV). Include column headers such as: First Name, Last Name, Email, Phone, Date of Birth, Gender, Nationality, Address, University, Major, GPA, Credits Completed, Graduation Year, Enrollment Status, Test, Score, Level, Date Taken, Courses, Honors.
+
+Arabic headers are also supported: إسم المتقدم, الجنس, الجامعة, البرنامج, الدرجة العلمية, الدولة, رقم الهاتف, ايميل المتقدم, اختبار اللغة</textarea>
+</div>
+<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+<button type="button" onclick="submitImportStudentsForm()" class="btn btn-primary">Import Students</button>
+<button type="button" onclick="closeModalDirect()" class="btn">Cancel</button>
+</div>
+</form>
+`;
+    document.getElementById('modal-overlay').classList.add('open');
+    document.body.style.overflow = 'hidden';
+    document.getElementById('modal').dataset.studentId = '';
+    const editBtn = document.getElementById('modal-edit-btn');
+    const delBtn = document.getElementById('modal-delete-btn');
+    if (editBtn) editBtn.style.display = 'none';
+    if (delBtn) delBtn.style.display = 'none';
+}
+
+async function submitImportStudentsForm() {
+    const form = document.getElementById('import-students-form');
+    if (!form) return;
+    clearFormError();
+
+    const fileInput = form.querySelector('input[type="file"]');
+    if (!fileInput || !fileInput.files.length) {
+        showFormError('Please choose an Excel (.xlsx, .xls) or TSV (.tsv) file to import');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+
+    try {
+        const res = await fetch(`${API_URL}/students/import`, {
+            method: 'POST',
+            body: formData
+        });
+        const result = await res.json();
+        if (!res.ok) {
+            const error = result.error || 'Import failed';
+            const details = result.details ? `\nDetails: ${JSON.stringify(result.details)}` : '';
+            throw new Error(error + details);
+        }
+
+        await loadStudents();
+        buildKPIs(); buildOverviewCharts(); buildAcademicsCharts(); buildEnglishCharts(); buildWorkCharts(); populateMajorFilter(); buildStudentGrid(students);
+        closeModalDirect();
+        window.scrollTo(0, 0);
+        alert(`Imported ${result.imported} students successfully.`);
+    } catch (err) {
+        console.error('Failed to import students:', err);
+        showFormError('Failed to import students: ' + err.message);
+        window.scrollTo(0, 0);
+    }
 }
 
 async function submitAddStudentForm() {

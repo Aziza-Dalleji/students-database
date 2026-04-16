@@ -4,12 +4,26 @@ const path = require('path');
 
 async function initializeDatabase() {
   try {
-    const connection = await mysql.createConnection({
-      host: process.env.MYSQLHOST,
-      port: process.env.MYSQLPORT,
+    // First connect without database to create it if needed
+    const tempConnection = await mysql.createConnection({
+      host: process.env.MYSQLHOST ,
+      port: process.env.MYSQLPORT ,
       user: process.env.MYSQLUSER,
       password: process.env.MYSQLPASSWORD,
-      database: process.env.MYSQLDATABASE,
+      multipleStatements: true
+    });
+
+    const dbName = process.env.MYSQLDATABASE || 'student_db';
+    await tempConnection.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\``);
+    await tempConnection.end();
+
+    // Now connect to the database
+    const connection = await mysql.createConnection({
+      host: process.env.MYSQLHOST ,
+      port: process.env.MYSQLPORT,
+      user: process.env.MYSQLUSER,
+      password: process.env.MYSQLPASSWORD ,
+      database: dbName,
       multipleStatements: true
     });
 

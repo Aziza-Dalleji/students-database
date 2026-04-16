@@ -6,6 +6,7 @@ const pool = require('./db');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const xlsx = require('xlsx');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -553,6 +554,299 @@ app.post('/api/students', upload.fields([
     
     console.error('Error creating student:', err);
     res.status(500).json({ error: 'Failed to create student: ' + err.message });
+  }
+});
+
+// Import students from an Excel file
+app.post('/api/students/import', upload.single('file'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No file uploaded' });
+  }
+
+  const cleanupImportFile = () => {
+    const filePath = path.join(documentsDir, req.file.filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+  };
+
+  try {
+    const fileExt = path.extname(req.file.originalname).toLowerCase();
+    let rows;
+
+    if (fileExt === '.xlsx' || fileExt === '.xls') {
+      // Handle Excel files
+      const workbook = xlsx.readFile(req.file.path, { cellDates: true });
+      const sheetName = workbook.SheetNames[0];
+      if (!sheetName) {
+        cleanupImportFile();
+        return res.status(400).json({ error: 'Excel file contains no sheets' });
+      }
+      const worksheet = workbook.Sheets[sheetName];
+      rows = xlsx.utils.sheet_to_json(worksheet, { defval: '', raw: false, dateNF: 'yyyy-mm-dd' });
+    } else if (fileExt === '.csv' || fileExt === '.tsv' || fileExt === '.txt') {
+      // Handle CSV/TSV files
+      const delimiter = fileExt === '.tsv' ? '\t' : ',';
+      const fileContent = fs.readFileSync(req.file.path, 'utf8');
+      const lines = fileContent.split('\n').filter(line => line.trim());
+      if (lines.length < 2) {
+        cleanupImportFile();
+        return res.status(400).json({ error: 'File contains no data rows' });
+      }
+      const headers = lines[0].split(delimiter).map(h => h.trim());
+      rows = lines.slice(1).map(line => {
+        const values = line.split(delimiter);
+        const row = {};
+        headers.forEach((header, index) => {
+          row[header] = values[index] || '';
+        });
+        return row;
+      });
+    } else {
+      cleanupImportFile();
+      return res.status(400).json({ error: 'Unsupported file format. Please upload .xlsx, .xls, .csv, or .tsv files.' });
+    }
+
+    if (!rows.length) {
+      cleanupImportFile();
+      return res.status(400).json({ error: 'File contains no rows' });
+    }
+
+    const normalizeHeader = header => header.toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, '');
+    const columnMap = {
+      // English mappings
+      firstname: 'first_name',
+      first: 'first_name',
+      lastname: 'last_name',
+      last: 'last_name',
+      email: 'email',
+      phonenumber: 'phone',
+      telephone: 'phone',
+      phone: 'phone',
+      dateofbirth: 'date_of_birth',
+      dob: 'date_of_birth',
+      birthdate: 'date_of_birth',
+      gender: 'gender',
+      nationality: 'nationality',
+      country: 'nationality',
+      address: 'address',
+      university: 'university',
+      school: 'university',
+      major: 'major',
+      minor: 'minor',
+      degree: 'degree',
+      gpa: 'gpa',
+      creditscompleted: 'credits_completed',
+      credits: 'credits_completed',
+      graduationyear: 'graduation_year',
+      gradyear: 'graduation_year',
+      enrollmentstatus: 'enrollment_status',
+      status: 'enrollment_status',
+      test: 'test',
+      english_test: 'test',
+      score: 'score',
+      english_score: 'score',
+      level: 'level',
+      english_level: 'level',
+      datetaken: 'date_taken',
+      coursetitle: 'courses',
+      courses: 'courses',
+      course: 'courses',
+      workexperience: 'work_experience',
+      work_experience: 'work_experience',
+      honor: 'honors',
+      honors: 'honors',
+      // Arabic mappings (exact header matches)
+      'رقم الطلب': 'application_number',
+      'هوية المتقدم': 'id_number',
+      'إسم المتقدم': 'full_name',
+      'الجنس': 'gender',
+      'الجامعة': 'university',
+      'البرنامج': 'major',
+      'الدرجة العلمية': 'degree',
+      'الدولة': 'nationality',
+      'رقم الهاتف': 'phone',
+      'ايميل المتقدم': 'email',
+      'اختبار اللغة': 'test'
+    };
+
+    const fmt = value => {
+      if (value === null || value === undefined) return '';
+      if (value instanceof Date) return value.toISOString().split('T')[0];
+      return value.toString().trim();
+    };
+
+    const parseRow = raw => {
+      const parsed = {};
+      Object.keys(raw).forEach(key => {
+        const trimmedKey = key.toString().trim();
+        let mapped = null;
+
+        // First check for exact Arabic header matches
+        if (columnMap[trimmedKey]) {
+          mapped = columnMap[trimmedKey];
+        } else {
+          // Fall back to normalized English headers
+          const normalizedKey = normalizeHeader(key);
+          mapped = columnMap[normalizedKey];
+        }
+
+        if (mapped) {
+          parsed[mapped] = fmt(raw[key]);
+        }
+      });
+
+      // Special handling for full_name: split into first and last
+      if (parsed.full_name && !parsed.first_name && !parsed.last_name) {
+        const nameParts = parsed.full_name.trim().split(/\s+/);
+        if (nameParts.length >= 2) {
+          parsed.first_name = nameParts[0];
+          parsed.last_name = nameParts.slice(1).join(' ');
+        } else {
+          parsed.first_name = parsed.full_name;
+          parsed.last_name = '';
+        }
+      }
+
+      // Special handling for gender: map Arabic to English
+      if (parsed.gender) {
+        if (parsed.gender.includes('ذكر')) parsed.gender = 'Male';
+        else if (parsed.gender.includes('انثى')) parsed.gender = 'Female';
+      }
+
+      // Special handling for degree: map Arabic terms
+      if (parsed.degree) {
+        if (parsed.degree.includes('تدريب')) parsed.degree = 'Training';
+        else if (parsed.degree.includes('ماجستير')) parsed.degree = 'Master';
+        else if (parsed.degree.includes('بكالوريوس')) parsed.degree = 'Bachelor';
+      }
+
+      // Set defaults for missing required fields
+      if (!parsed.date_of_birth) parsed.date_of_birth = '1990-01-01'; // Default DOB
+      if (!parsed.address) parsed.address = 'Saudi Arabia'; // Default address
+
+      return parsed;
+    };
+
+    const requiredFields = ['first_name', 'last_name', 'email', 'phone', 'date_of_birth', 'gender', 'nationality', 'address'];
+    const payloads = rows.map(parseRow);
+    const invalidRows = [];
+
+    payloads.forEach((payload, index) => {
+      const missing = requiredFields.filter(field => !payload[field] || payload[field].toString().trim() === '');
+      if (missing.length) {
+        invalidRows.push({ row: index + 2, missing });
+      }
+    });
+
+    if (invalidRows.length) {
+      cleanupImportFile();
+      return res.status(400).json({ error: 'Missing required fields in spreadsheet', details: invalidRows.slice(0, 5) });
+    }
+
+    const connection = await pool.getConnection();
+    await connection.beginTransaction();
+    const [lastRows] = await connection.query('SELECT student_id FROM students ORDER BY student_id DESC LIMIT 1');
+    let idCounter = lastRows.length ? parseInt(lastRows[0].student_id.replace(/\D/g, ''), 10) || 0 : 0;
+    const importedIds = [];
+
+    for (const payload of payloads) {
+      idCounter += 1;
+      const studentId = 'STU' + String(idCounter).padStart(4, '0');
+      importedIds.push(studentId);
+
+      await connection.query(
+        'INSERT INTO students (student_id, first_name, last_name, date_of_birth, gender, nationality, email, phone, address) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          studentId,
+          payload.first_name,
+          payload.last_name,
+          payload.date_of_birth,
+          payload.gender,
+          payload.nationality,
+          payload.email,
+          payload.phone,
+          payload.address
+        ]
+      );
+
+      await connection.query(
+        'INSERT INTO academic_records (student_id, university, major, minor, degree, gpa, credits_completed, graduation_year, enrollment_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [
+          studentId,
+          payload.university || '',
+          payload.major || '',
+          payload.minor || '',
+          payload.degree || '',
+          payload.gpa ? parseFloat(payload.gpa) : 0,
+          payload.credits_completed ? parseInt(payload.credits_completed, 10) : 0,
+          payload.graduation_year ? parseInt(payload.graduation_year, 10) : null,
+          payload.enrollment_status || ''
+        ]
+      );
+
+      await connection.query(
+        'INSERT INTO english_scores (student_id, test, score, level, date_taken) VALUES (?, ?, ?, ?, ?)',
+        [
+          studentId,
+          payload.test || 'TOEFL',
+          payload.score ? parseInt(payload.score, 10) : 0,
+          payload.level || 'Beginner',
+          payload.date_taken || new Date().toISOString().split('T')[0]
+        ]
+      );
+
+      if (payload.courses) {
+        const courses = payload.courses.toString().split(',').map(c => c.trim()).filter(Boolean);
+        for (const course of courses) {
+          await connection.query('INSERT INTO courses (student_id, course_name) VALUES (?, ?)', [studentId, course]);
+        }
+      }
+
+      if (payload.honors) {
+        const honors = payload.honors.toString().split(',').map(h => h.trim()).filter(Boolean);
+        for (const honor of honors) {
+          await connection.query('INSERT INTO honors (student_id, honor_name) VALUES (?, ?)', [studentId, honor]);
+        }
+      }
+
+      if (payload.work_experience) {
+        let workEntries = [];
+        const workValue = payload.work_experience.toString().trim();
+        if (workValue.startsWith('[') || workValue.startsWith('{')) {
+          try {
+            workEntries = JSON.parse(workValue);
+          } catch (_) {
+            workEntries = [];
+          }
+        }
+        if (Array.isArray(workEntries)) {
+          for (const entry of workEntries) {
+            await connection.query(
+              'INSERT INTO work_experience (student_id, company, title, start_date, end_date, duration_months, description) VALUES (?, ?, ?, ?, ?, ?, ?)',
+              [
+                studentId,
+                entry.company || '',
+                entry.title || '',
+                entry.start_date || '',
+                entry.end_date || '',
+                entry.duration_months ? parseInt(entry.duration_months, 10) : 0,
+                entry.description || ''
+              ]
+            );
+          }
+        }
+      }
+    }
+
+    await connection.commit();
+    connection.release();
+    cleanupImportFile();
+    res.json({ status: 'imported', imported: importedIds.length, student_ids: importedIds });
+  } catch (err) {
+    cleanupImportFile();
+    console.error('Error importing students:', err);
+    res.status(500).json({ error: 'Failed to import students: ' + err.message });
   }
 });
 
